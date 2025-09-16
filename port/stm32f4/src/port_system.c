@@ -122,16 +122,47 @@ size_t port_system_init()
 //------------------------------------------------------
 // TIMER RELATED FUNCTIONS
 //------------------------------------------------------
+/**
+ * @brief Resume Tick increment.
+ * 
+ */
+void port_system_systick_resume()
+{
+  SysTick->CTRL |= SysTick_CTRL_TICKINT_Msk;
+}
+
+/**
+ * @brief Suspend Tick increment.
+ * 
+ */
+void port_system_systick_suspend()
+{
+ SysTick->CTRL &= ~SysTick_CTRL_TICKINT_Msk;
+}
+
+/**
+ * @brief Get the count of the system tick in milliseconds
+ * 
+ * @return uint32_t 
+ */
 uint32_t port_system_get_millis()
 {
-  return 0;
+  return msTicks;
 }
-
+/**
+ * @brief Sets the number of milliseconds since the system started
+ * 
+ * @param ms New number of milliseconds since the system started
+ */
 void port_system_set_millis(uint32_t ms)
 {
-  
+  msTicks = ms;
 }
-
+/**
+ * @brief Wait for some milliseconds
+ * 
+ * @param ms Number of milliseconds to wait
+ */
 void port_system_delay_ms(uint32_t ms)
 {
   uint32_t tickstart = port_system_get_millis();
@@ -141,6 +172,12 @@ void port_system_delay_ms(uint32_t ms)
   }
 }
 
+/**
+ * @brief Wait for some milliseconds from a time reference
+ * 
+ * @param p_t Pointer to the time reference
+ * @param ms Number o milliseconds to wait
+ */
 void port_system_delay_until_ms(uint32_t *p_t, uint32_t ms)
 {
   uint32_t until = *p_t + ms;
@@ -255,6 +292,56 @@ void port_system_gpio_config_alternate(GPIO_TypeDef *p_port, uint8_t pin, uint8_
   p_port->AFR[(uint8_t)(pin / 8)] |= (alternate << displacement);
 }
 
+// Funciones a implementar
+
+bool port_system_gpio_read 	( GPIO_TypeDef * p_port, uint8_t pin ){
+
+  // devolvemos el valor del registro idr y lo casteamos a buleano 
+  bool value = (bool)(p_port -> IDR & BIT_POS_TO_MASK(pin));
+  return value;
+
+}
+
+void port_system_gpio_write ( GPIO_TypeDef * p_port, uint8_t pin, bool value ){
+
+  if (value == true) {
+  p_port -> BSRR &= ~BIT_POS_TO_MASK(pin);
+  }
+  else if (value == false) {
+  p_port -> BSRR |= (BIT_POS_TO_MASK(pin) << 16); 
+  }
+
+}
+
+void port_system_gpio_toggle  ( GPIO_TypeDef * p_port, uint8_t pin){
+
+  port_system_gpio_write(p_port, pin, !port_system_gpio_read(p_port, pin));
+
+}
+
+
 // ------------------------------------------------------
 // POWER RELATED FUNCTIONS
 // ------------------------------------------------------
+
+
+void port_system_power_stop()
+{
+ MODIFY_REG(PWR->CR, (PWR_CR_PDDS | PWR_CR_LPDS), PWR_CR_LPDS);   // Select the regulator state in Stop mode: Set PDDS and LPDS bits according to PWR_Regulator value
+ SCB->SCR |= ((uint32_t)SCB_SCR_SLEEPDEEP_Msk);   // Set SLEEPDEEP bit of Cortex System Control Register
+ __WFI(); // Select Stop mode entry : Request Wait For Interrupt
+ SCB->SCR &= ~((uint32_t)SCB_SCR_SLEEPDEEP_Msk); // Reset SLEEPDEEP bit of Cortex System Control Register
+}
+
+
+void port_system_power_sleep()
+{
+ MODIFY_REG(PWR->CR, (PWR_CR_PDDS | PWR_CR_LPDS), PWR_CR_LPDS);   // Select the regulator state in Stop mode: Set PDDS and LPDS bits according to PWR_Regulator value
+ SCB->SCR &= ~((uint32_t)SCB_SCR_SLEEPDEEP_Msk);   // Reset SLEEPDEEP bit of Cortex System Control Register
+ __WFI(); // Select Sleep mode entry : Request Wait For Interrupt
+}
+
+void port_system_sleep	(	void ) {
+  port_system_systick_suspend();
+  port_system_power_sleep();
+}

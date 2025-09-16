@@ -1,0 +1,513 @@
+/**
+ * @file fsm_jukebox.c
+ * @brief Jukebox FSM main file.
+ * @author Javier de Ponte Hernando
+ * @author Roberto Maldonado Macafee
+ * @date 17/05/2024
+ */
+
+/* Includes ------------------------------------------------------------------*/
+// Standard C includes
+#include <string.h> // strcmp
+#include <stdio.h>  // sprintf
+
+// Other includes
+#include "fsm.h"
+#include <stdlib.h>
+
+#include "fsm_jukebox.h"
+#include "fsm_button.h"
+#include "fsm_usart.h"
+#include "fsm_buzzer.h"
+#include "port_system.h"
+#include "port_usart.h"
+
+/* Defines ------------------------------------------------------------------*/
+#define MAX(a, b) ((a) > (b) ? (a) : (b)) /*!< Macro to get the maximum of two values. */
+
+/* Private functions */
+
+/**
+ * @brief Parse the message received by the USART.
+ * 
+ * Given data received by the USART, this function parses the message and extracts the command and the parameter (if available).
+ * 
+ * > 1. Split the message by space using function `strtok()` \n
+ * > 2. If there's a token (command), copy it to the `p_command` variable. Otherwise, return `false` \n
+ * > 3. Extract the parameter (if available). To do so, get the next token using function `strtok()`. If there's a token, copy it to the `p_param` variable. Otherwise, copy an empty string to the `p_param` variable \n
+ * > 4. Return `true` indicating that the message has been parsed correctly \n
+ * 
+ * @param p_message Pointer to the message received by the USART.
+ * @param p_command Pointer to store the command extracted from the message. 
+ * @param p_param Pointer to store the parameter extracted from the message. 
+ * @return true if the message has been parsed correctly 
+ * @return false if the message has not been parsed correctly 
+ */
+bool _parse_message(char *p_message, char *p_command, char *p_param)
+{
+    char *p_token = strtok(p_message, ""); // Split the message by space
+
+    // If there's a token (command), copy it to the command variable
+    if (p_token != NULL)
+    {
+        strcpy(p_command, p_token);
+    }
+    else
+    {
+        // No command found, you might return an error or handle it as needed
+        // The USART driver of the computer sends an empty at initialization, so we will ignore it
+        return false;
+    }
+
+    // Extract the parameter (if available)
+    p_token = strtok(NULL, ""); // Get the next token
+
+    if (p_token != NULL)
+    {
+        strcpy(p_param, p_token);
+    }
+    else
+    {
+        strcpy(p_param, " "); // NO param found
+    }
+    return true;
+}
+
+/**
+ * @brief Set the next song to be played.
+ * @param p_fsm_jukebox	Pointer to the Jukebox FSM.
+ */
+void _set_next_song	(fsm_jukebox_t * p_fsm_jukebox){
+    //Stop the buzzer by calling fsm_buzzer_set_action() with the right parameter.
+    fsm_buzzer_set_action (p_fsm_jukebox->p_fsm_buzzer, STOP);
+    //Update the melody index to select to the next song by increasing this melody_idx in 1. If the result equals or greater than the maximum number of melodies (MELODIES_MEMORY_SIZE), set the index to 0.
+    p_fsm_jukebox -> melody_idx++;
+    if(p_fsm_jukebox -> melody_idx >= MELODIES_MEMORY_SIZE){
+        p_fsm_jukebox -> melody_idx = 0;
+    } 
+    //Check if the melody exists. A melody exists if the length of the melody is greater than 0. If it does not exist, set the index of the melody to be played (melody_idx) to 0. After updating the melody_idx the name of the melody to be played (p_melody) to the name of the melody selected before.
+    if (p_fsm_jukebox -> melodies[p_fsm_jukebox -> melody_idx].melody_length <= 0){
+        p_fsm_jukebox -> melody_idx = 0;
+    }
+    //Print by the ITM terminal the message "Playing: %s\n" by calling printf() with the name of the melody to be played.
+    printf("Playing: %s\n", p_fsm_jukebox -> p_melody = p_fsm_jukebox -> melodies[p_fsm_jukebox -> melody_idx].p_name);
+    //Set the melody to be played by calling fsm_buzzer_set_melody() properly.
+    fsm_buzzer_set_melody(p_fsm_jukebox -> p_fsm_buzzer, &(p_fsm_jukebox -> melodies[p_fsm_jukebox -> melody_idx]));
+    //Set the status of the buzzer correctly by calling fsm_buzzer_set_action(). After this call, the buzzer will start playing the melody.
+    fsm_buzzer_set_action(p_fsm_jukebox -> p_fsm_buzzer, PLAY);
+
+}
+
+/**
+ * @brief Execute the command received by the USART.
+ * @param p_fsm_jukebox	Pointer to the Jukebox FSM.
+ * @param p_command Pointer to store the command extracted from the message. 
+ * @param p_param Pointer to store the parameter extracted from the message.  
+ */
+void _execute_command	(fsm_jukebox_t * p_fsm_jukebox, char * p_command, char * p_param){
+    if (strcmp(p_command, "play") == 0)
+    {
+        fsm_buzzer_set_action(p_fsm_jukebox -> p_fsm_buzzer, PLAY);
+    }
+    else
+    {
+        if (strcmp(p_command, "stop") == 0)
+        {
+            fsm_buzzer_set_action(p_fsm_jukebox -> p_fsm_buzzer, STOP);
+        }
+        else
+        {
+            if (strcmp(p_command, "pause") == 0)
+            {
+                fsm_buzzer_set_action(p_fsm_jukebox -> p_fsm_buzzer, PAUSE);
+            }
+            else
+            {
+                if (strcmp(p_command, "speed") == 0)
+                {
+                    double param = atof(p_param);
+                    fsm_buzzer_set_speed(p_fsm_jukebox -> p_fsm_buzzer, MAX(param, 0.1));
+                }
+                else
+                {
+                    if (strcmp(p_command, "next") == 0)
+                    {
+                        _set_next_song(p_fsm_jukebox);
+                    }
+                    else
+                    {
+                        if (strcmp(p_command, "select") == 0)
+                        {
+                            uint32_t melody_selected = atoi(p_param);
+                            if (p_fsm_jukebox->melodies[p_fsm_jukebox->melody_idx].melody_length != 0)
+                            {
+                                fsm_buzzer_set_action(p_fsm_jukebox -> p_fsm_buzzer, STOP);
+                                fsm_buzzer_set_melody(p_fsm_jukebox -> p_fsm_buzzer, &p_fsm_jukebox->melodies[melody_selected]);
+
+
+                                fsm_buzzer_set_action(p_fsm_jukebox -> p_fsm_buzzer, PLAY);
+                            }
+                            else
+                            {
+                                char *error = "Error : Command not found\n";
+                                fsm_usart_set_out_data(p_fsm_jukebox->p_fsm_usart, error);
+                            }
+                        }
+                        else
+                        {
+                            if (strcmp(p_command, "info") == 0)
+                            {
+                                char msg[USART_OUTPUT_BUFFER_LENGTH];
+                                sprintf(msg, "Playing: %s\n", p_fsm_jukebox->p_melody);
+                                fsm_usart_set_out_data(p_fsm_jukebox->p_fsm_usart, msg);
+                            }
+                            else
+                            {
+                                char *error = "Error : Command not found\n";
+                                fsm_usart_set_out_data(p_fsm_jukebox->p_fsm_usart, error);
+                            }
+                        }
+                        
+                    }
+                    
+                }
+                
+            }
+            
+        }
+        
+    }
+    
+}	
+
+
+
+
+/* State machine input or transition functions */
+/**
+ * @brief Check if any of the elements of the system is active.
+ * @param p_this Pointer to an fsm_t struct that contains an fsm_jukebox_t.
+ * @return true 
+ * @return false 
+ */
+static bool check_activity	(fsm_t *p_this){
+    fsm_jukebox_t *p_fsm = (fsm_jukebox_t *)(p_this);
+    // Return true if any of the elements (button, USART, or buzzer) is active
+    // otherwise return false
+    bool button_active = fsm_button_check_activity(p_fsm -> p_fsm_button);
+    bool buzzer_active = fsm_buzzer_check_activity(p_fsm -> p_fsm_buzzer);
+    bool usart_active = fsm_usart_check_activity(p_fsm -> p_fsm_usart);
+    if((button_active == true) || (buzzer_active == true) || (usart_active == true)){
+        return true;
+    } else {
+        return false;
+    }
+}
+
+/**
+ * @brief Check if the button has been pressed for the required time to turn ON the Jukebox.
+ * @param p_this Pointer to an fsm_t struct that contains an fsm_jukebox_t.
+ * @return true 
+ * @return false 
+ */
+static bool check_on(fsm_t *p_this){
+    fsm_jukebox_t *p_fsm = (fsm_jukebox_t *)(p_this);   
+    // Call fsm_button_get_duration() to get the duration of the button press
+    uint32_t duration = fsm_button_get_duration(p_fsm->p_fsm_button);
+    // Return true if the duration > 0 and > required time to turn on the jukebox
+    if((duration > 0) && (duration > (p_fsm -> on_off_press_time_ms))){
+        return true;
+    } else {
+        return false;
+    }
+}
+
+/**
+ * @brief Check if the button has been pressed for the required time to turn OFF the Jukebox.
+ * 
+ * @param p_this Pointer to an fsm_t struct that contains an fsm_jukebox_t.
+ * @return true 
+ * @return false 
+ */
+static bool check_off(fsm_t *p_this){
+    return check_on(p_this);
+}	
+
+/**
+ * @brief Check if the buzzer has finished playing the melody.
+ * 
+ * @param p_this Pointer to an fsm_t struct that contains an fsm_jukebox_t.
+ * @return true 
+ * @return false 
+ */
+static bool check_melody_finished(fsm_t *p_this){
+    fsm_jukebox_t *p_fsm = (fsm_jukebox_t *)(p_this);  
+    // Return true if the fsm_buzzer_get_action = STOP
+    // otherwise, false
+    if(fsm_buzzer_get_action(p_fsm -> p_fsm_buzzer) == STOP){
+        return true;
+    } else {
+        return false;
+
+    }
+}
+
+/**
+ * @brief Check if the USART has received data.
+ * 
+ * @param p_this Pointer to an fsm_t struct that contains an fsm_jukebox_t.
+ * @return true 
+ * @return false 
+*/
+static bool check_command_received(fsm_t *p_this){
+    fsm_jukebox_t *p_fsm = (fsm_jukebox_t *)(p_this);  
+    return fsm_usart_check_data_received(p_fsm -> p_fsm_usart);
+}
+
+/**
+ * @brief Check if the button has been pressed for the required time to load the next song.
+ * 
+ * @param p_this Pointer to an fsm_t struct that contains an fsm_jukebox_t.
+ * @return true 
+ * @return false 
+ */
+static bool check_next_song_button(fsm_t *p_this){
+    fsm_jukebox_t *p_fsm = (fsm_jukebox_t *)(p_this);   
+    //Calls fsm_button_get_duration to get the duration of the button press
+    uint32_t duration = fsm_button_get_duration(p_fsm -> p_fsm_button);
+    // Return true if the duration is greater than 0, greater than required time to load next song
+    // and lower than the required time to turn the jukebox off. Otherwise return false
+    if((duration > 0) && (duration >  (p_fsm -> next_song_press_time_ms)) && (duration < (p_fsm -> on_off_press_time_ms))){
+        return true;
+    } else {
+        return false;
+    }
+}	
+
+/**
+ * @brief Check if all the is system active.
+ * 
+ * @param p_this Pointer to an fsm_t struct that contains an fsm_jukebox_t.
+ * @return true if all the elements of the system are inactive
+ * @return false 
+ */
+static bool check_no_activity(fsm_t *p_this){
+    // Call check_activity and return the inverse of the result
+    return !check_activity(p_this);
+}	
+
+/* State machine output or action functions */
+
+/**
+ * @brief Initialize the Jukebox by playing the intro melody, at the beginning of the program.
+ * 
+ * @param p_this Pointer to an fsm_t struct that contains an fsm_jukebox_t.
+ */
+static void do_start_up	(fsm_t *p_this){
+    fsm_jukebox_t *p_fsm = (fsm_jukebox_t *)(p_this);
+    // Reset the duration of the button: fsm_button_reset_duration()
+    fsm_button_reset_duration(p_fsm->p_fsm_button);
+    // Enable RX USART interrupts by calling the right function
+    fsm_usart_enable_rx_interrupt(p_fsm ->p_fsm_usart);
+    // Print by the ITM terminal the message "Jukebox ON" with printf
+    // (only for debugging purposes)
+    printf("Jukebox ON \n");
+    // Set the speed of the buzzer to 1.0 by calling fsm_buzzer_set_speed
+    fsm_buzzer_set_speed (p_fsm->p_fsm_buzzer, 1.0);
+    // Set the scale_melody to be played by calling fsm_buzzer_set_melody
+    fsm_buzzer_set_melody (p_fsm->p_fsm_buzzer, &scale_melody);
+    // Set the status of the buzzer to PLAY by calling fsm_buzzer_set_action 
+    fsm_buzzer_set_action (p_fsm->p_fsm_buzzer, PLAY);
+}
+
+
+/**
+ * @brief After playing the intro melody, start the Jukebox.
+ * 
+ * @param p_this Pointer to an fsm_t struct that contains an fsm_jukebox_t.
+ */
+static void do_start_jukebox	(fsm_t *p_this)	{
+    fsm_jukebox_t *p_fsm = (fsm_jukebox_t *)(p_this);  
+    //Set the index of the melody to be played (melody_idx) to 0. Set the index to any other melody you want to play first.
+    p_fsm -> melody_idx = 0;
+    //Set the name of the melody to be played (p_melody) to the name of the melody selected before.
+    p_fsm -> p_melody = p_fsm -> melodies[p_fsm -> melody_idx].p_name;
+}
+/* EXTRA */
+/**
+ * @brief When the jukebox is set to turn OFF, plays its last song
+ * 
+ * @param p_this Pointer to an fsm_t struct that contains an fsm_jukebox_t.
+ */
+static void do_play_last_song(fsm_t *p_this){
+    fsm_jukebox_t *p_fsm = (fsm_jukebox_t *)(p_this);
+   //EXTRA
+    fsm_buzzer_set_melody (p_fsm -> p_fsm_buzzer, &scale_reverse_melody);
+    // Set the status of the buzzer to PLAY by calling fsm_buzzer_set_action 
+    fsm_buzzer_set_action (p_fsm -> p_fsm_buzzer, PLAY);
+    printf("This was my last song \n");
+}
+
+/**
+ * @brief Turn the Jukebox OFF.
+ * 
+ * @param p_this Pointer to an fsm_t struct that contains an fsm_jukebox_t.
+ */
+static void do_stop_jukebox	(fsm_t *p_this)	{
+    fsm_jukebox_t *p_fsm = (fsm_jukebox_t *)(p_this);  
+    //Reset the duration of the button by calling fsm_button_reset_duration().
+    fsm_button_reset_duration(p_fsm->p_fsm_button);
+    //Disable USART interrupts by calling fsm_usart_disable_rx_interrupt() and fsm_usart_disable_tx_interrupt().
+    fsm_usart_disable_rx_interrupt(p_fsm -> p_fsm_usart);
+    fsm_usart_disable_tx_interrupt(p_fsm -> p_fsm_usart);
+    // Print by the ITM terminal the message "Jukebox OFF\n" by calling printf(). 
+    printf("Jukebox OFF \n");
+    //Stop the buzzer by calling fsm_buzzer_set_action() with the right parameter.
+    fsm_buzzer_set_action (p_fsm->p_fsm_buzzer, STOP);
+}
+
+
+/**
+ * @brief Load the next song.
+ * 
+ * @param p_this Pointer to an fsm_t struct that contains an fsm_jukebox_t.
+ */
+static void do_load_next_song	(fsm_t *p_this)	{
+    fsm_jukebox_t *p_fsm = (fsm_jukebox_t *)(p_this);  
+    //Call function _set_next_song() to load the next song.
+    _set_next_song(p_fsm);
+    //Reset the duration of the button by calling fsm_button_reset_duration().
+    fsm_button_reset_duration(p_fsm->p_fsm_button);
+}
+
+/**
+ * @brief Read the command received by the USART.
+ * 
+ * @param p_this Pointer to an fsm_t struct that contains an fsm_jukebox_t.
+ */
+static void do_read_command	(fsm_t *p_this){
+    fsm_jukebox_t *p_fsm = (fsm_jukebox_t *)(p_this);  
+    //Declare the following auxiliary variables, they will be used to parse the message received by the USART.
+    char p_message[USART_INPUT_BUFFER_LENGTH];
+    char p_command[USART_INPUT_BUFFER_LENGTH];
+    char p_param[USART_INPUT_BUFFER_LENGTH];
+    //Call function fsm_usart_get_in_data() to get the message received by the USART in the variable p_message.
+    fsm_usart_get_in_data(p_fsm -> p_fsm_usart, p_message);
+    //Call function _parse_message() to parse the message received by the USART and retrieve the result. 
+    bool is_valid_message = _parse_message(p_message, p_command, p_param);
+    //If the message is valid, call function _execute_command() to execute the command received by the USART.
+    if(is_valid_message){
+        _execute_command(p_fsm, p_command, p_param);   
+    }
+    //Reset the message received by the USART by calling fsm_usart_reset_input_data()
+    fsm_usart_reset_input_data(p_fsm -> p_fsm_usart);
+    //Reset the p_message variable to 0 (or any other value) to avoid reading the same message again.
+    memset(p_message, 0, sizeof(p_message));
+}	
+
+/**
+ * @brief Start the low power mode while the Jukebox is OFF.
+ * 
+ * @param p_this Pointer to an fsm_t struct that contains an fsm_jukebox_t.
+ */
+static void do_sleep_off (	fsm_t *p_this){
+    //Call function port_system_sleep() to start the low power mode.
+    port_system_sleep();
+}
+
+/**
+ * @brief Start the low power mode while the Jukebox is waiting for a command.
+ * 
+ * @param p_this Pointer to an fsm_t struct that contains an fsm_jukebox_t.
+ */
+static void do_sleep_wait_command (fsm_t *p_this){
+    //Call function port_system_sleep() to start the low power mode.
+    port_system_sleep();
+}
+
+/**
+ * @brief Start the low power mode while the Jukebox is OFF.
+ * 
+ * @param p_this Pointer to an fsm_t struct that contains an fsm_jukebox_t.
+ */
+static void do_sleep_while_off (fsm_t *p_this){
+    //Call function port_system_sleep() to start the low power mode.
+    port_system_sleep();
+}
+
+/**
+ * @brief Start the low power mode while the Jukebox is ON.
+ * 
+ * @param p_this Pointer to an fsm_t struct that contains an fsm_jukebox_t.
+ */
+static void do_sleep_while_on (	fsm_t *p_this){
+    //Call function port_system_sleep() to start the low power mode.
+    port_system_sleep();
+}
+
+/**
+ * @brief Array representing the transitions table of the FSM Jukebox.
+ * 
+ */
+static fsm_trans_t fsm_trans_jukebox[] = {
+    //{ESTADO_INICIAL, funcion_comprueba_Condicion, ESTADO_SIGUIENTE, funcion_si_transicion}
+    {OFF, check_on, START_UP, do_start_up},
+    {OFF, check_no_activity, SLEEP_WHILE_OFF, do_sleep_off},
+    {SLEEP_WHILE_OFF, check_activity, OFF, NULL},
+    {SLEEP_WHILE_OFF, check_no_activity, SLEEP_WHILE_OFF, do_sleep_while_off},
+    {START_UP, check_melody_finished, WAIT_COMMAND, do_start_jukebox},
+    {WAIT_COMMAND, check_next_song_button, WAIT_COMMAND, do_load_next_song},
+    {WAIT_COMMAND, check_command_received, WAIT_COMMAND, do_read_command},
+    {WAIT_COMMAND, check_no_activity, SLEEP_WHILE_ON, do_sleep_wait_command},
+    {SLEEP_WHILE_ON, check_no_activity, SLEEP_WHILE_ON, do_sleep_while_on},
+    {SLEEP_WHILE_ON, check_activity, WAIT_COMMAND, NULL},
+    // Modified {WAIT_COMMAND, check_off, OFF, do_stop_jukebox},
+    // EXTRA
+    {WAIT_COMMAND, check_off, PLAYING_LAST_SONG, do_play_last_song},
+    {PLAYING_LAST_SONG, check_melody_finished, OFF, do_stop_jukebox},
+    {-1, NULL, -1, NULL}
+};
+
+/* Public functions */
+
+void fsm_jukebox_init	(fsm_t *p_this,fsm_t *p_fsm_button, uint32_t on_off_press_time_ms, fsm_t *p_fsm_usart, fsm_t *p_fsm_buzzer,uint32_t next_song_press_time_ms ){
+    fsm_jukebox_t *p_fsm = (fsm_jukebox_t *)(p_this);   
+    //Call fsm_init with the received pointer and the transition table
+    fsm_init(p_this, fsm_trans_jukebox);
+    //Initializethe following fields with the received values
+    // p_fsm_button, on_off_press_time_ms, p_fsm_usart, next_song_press_time_ms of p_fsm
+    
+    p_fsm -> p_fsm_button = p_fsm_button;
+    p_fsm-> on_off_press_time_ms = on_off_press_time_ms;
+    p_fsm-> p_fsm_usart = p_fsm_usart;
+    p_fsm -> p_fsm_buzzer = p_fsm_buzzer;
+    p_fsm -> next_song_press_time_ms = next_song_press_time_ms;
+
+    // Initialize the melody index to 0
+    p_fsm -> melody_idx = 0;
+    
+    // Reset the array of melodies to 0. 
+    //memset(*dest, value, size)
+    memset(p_fsm -> melodies, 0, sizeof(p_fsm -> melodies));
+
+    // Load the melodies defined in melodies.c to the array of melodies
+    p_fsm -> melodies[0] = happy_birthday_melody;
+    p_fsm -> melodies[1] = tetris_melody;    
+    p_fsm -> melodies[2] = scale_melody;
+    p_fsm -> melodies[3] = spanish_anthem;
+    p_fsm -> melodies[4] = feliz_navidad_melody;
+
+
+}
+
+fsm_t *fsm_jukebox_new(fsm_t *p_fsm_button, uint32_t on_off_press_time_ms, fsm_t *p_fsm_usart, fsm_t *p_fsm_buzzer, uint32_t next_song_press_time_ms)
+{
+    fsm_t *p_fsm = malloc(sizeof(fsm_jukebox_t));
+
+    fsm_jukebox_init(p_fsm, p_fsm_button, on_off_press_time_ms, p_fsm_usart, p_fsm_buzzer, next_song_press_time_ms);
+    
+    return p_fsm;
+}
+
+
+
