@@ -3,7 +3,7 @@
 
 ## Authors
 
-* **Javier de Ponte Hernando** - email: [j.deponteh@alumnos.upm.es.es](mailto:j.deponteh@alumnos.upm.es)
+* **Javier de Ponte Hernando** - email: [j.deponteh@alumnos.upm.es](mailto:j.deponteh@alumnos.upm.es)
 * **Roberto Maldonado Macafee** - email: [roberto.maldonado.macafee@alumnos.upm.es](mailto:roberto.maldonado.macafee@alumnos.upm.es)
 
 
